@@ -9,7 +9,7 @@ pub(crate) struct Info {
     pub(crate) multi: Vec<(&'static str, &'static str)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Config {
     pub(crate) languages: HashMap<&'static str, Info>,
     ext_to_language: HashMap<&'static str, &'static str>,
@@ -43,6 +43,7 @@ impl Default for Config {
                 language!($language, $ext, vec![], vec![])
             };
         }
+
         language!("Bat", vec!["bat", "cmd"], vec!["@rem"]);
         language!("C", vec!["c"], vec!["//"], vec![("/*", "*/")]);
         language!("CHeader", vec!["h"], vec!["//"], vec![("/*", "*/")]);
@@ -85,6 +86,7 @@ impl Default for Config {
             vec![("<!--", "-->"), ("<![CDATA[", "]]>")]
         );
         language!("Yaml", vec!["yml", "yaml"], vec!["#"]);
+
         Self {
             languages,
             ext_to_language,

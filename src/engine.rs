@@ -9,7 +9,6 @@ use crate::config::{Config, Info};
 use crate::detail::Detail;
 use crate::detail::{aggregate_details, LanguageDetail, SumDetail};
 use crate::executor::ThreadPoolExecutor;
-use crate::wrap;
 use crate::ClocResult;
 
 // TODO: implement
@@ -20,11 +19,21 @@ pub(crate) struct Report {
     total_files: usize,
 }
 
+impl Report {
+    fn new(details: Vec<LanguageDetail>, sum: SumDetail, total_files: usize) -> Self {
+        Self {
+            details,
+            sum,
+            total_files,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Engine {
     config: Config,
     entry: PathBuf,
-    total_files: AtomicUsize,
+    total_files: usize,
     text_files: AtomicUsize,
     ignored_files: AtomicUsize,
     unrecognized_files: AtomicUsize,
@@ -41,29 +50,26 @@ impl Engine {
         Self {
             config: Config::default(),
             entry,
-            total_files: AtomicUsize::new(0),
+            total_files: 0,
             text_files: AtomicUsize::new(0),
             ignored_files: AtomicUsize::new(0),
             unrecognized_files: AtomicUsize::new(0),
         }
     }
 
-    pub(crate) fn calculate(self) -> (Vec<LanguageDetail>, SumDetail) {
+    // TODO: 这个函数应该返回`Report`结构体, 这样, pprint.rs中的输出函数只需要知道`Report`结构体就可以了, `LanguageDetail`与`SumDetail`便可以是crate private的了.
+    pub(crate) fn calculate(&mut self) -> (Vec<LanguageDetail>, SumDetail) {
         let executor = ThreadPoolExecutor::new();
-        let Engine {
-            config,
-            entry,
-            total_files,
-            ..
-        } = self;
-
-        let (config, _total_files) = wrap!(Arc, RwLock::new(config), total_files);
         let (sender, receiver) = sync_channel::<Message>(1024);
-        let receiver = Arc::new(Mutex::new(receiver));
 
+        let config = Arc::new(RwLock::new(self.config.clone()));
+        let receiver = Arc::new(Mutex::new(receiver));
         let details = Arc::new(Mutex::new(Vec::new()));
+
         for _ in 0..executor.capacity() {
-            let (receiver, config, details) = wrap!(Arc::clone, &receiver, &config, &details);
+            let receiver = Arc::clone(&receiver);
+            let config = Arc::clone(&config);
+            let details = Arc::clone(&details);
 
             executor.submit(move || {
                 while let Ok(message) = receiver
@@ -94,7 +100,7 @@ impl Engine {
                 }
             });
         }
-        explore(entry, &sender);
+        self.explore(self.entry.clone(), &sender);
         for _ in 0..executor.capacity() {
             sender.send(Message::End).unwrap();
         }
@@ -102,23 +108,16 @@ impl Engine {
 
         aggregate_details(Arc::try_unwrap(details).unwrap().into_inner().unwrap())
     }
-}
 
-fn explore(dir: PathBuf, sender: &SyncSender<Message>) {
-    // TODO: refactor
-    if dir.is_file() {
-        sender.send(Message::Content(dir)).unwrap();
-    } else if dir.is_dir() {
-        let entries = fs::read_dir(dir).unwrap();
-        for entry in entries {
-            let entry = entry.unwrap();
-
-            let path = entry.path();
-            if path.is_file() {
-                // TODO: remove unwrap
-                sender.send(Message::Content(path)).unwrap();
-            } else if path.is_dir() {
-                explore(path, sender);
+    fn explore(&mut self, dir: PathBuf, sender: &SyncSender<Message>) {
+        if dir.is_file() {
+            self.total_files += 1;
+            sender.send(Message::Content(dir)).unwrap();
+        } else if dir.is_dir() {
+            let entries = fs::read_dir(dir).unwrap();
+            for entry in entries {
+                let entry = entry.unwrap();
+                self.explore(entry.path(), sender);
             }
         }
     }
